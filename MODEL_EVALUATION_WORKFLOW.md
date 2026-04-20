@@ -9,15 +9,18 @@ This guide walks through the complete transition from TF-IDF proxy evaluation to
 **Purpose:** Fast, low-cost baseline evaluation of prompt strategies without needing a GPU.
 
 **Run:**
+
 ```bash
 .\.venv\Scripts\python scripts\prompt_engineering.py
 ```
 
 **Outputs:**
+
 - `outputs/prompt_experiments_summary.csv` - Per-strategy accuracy (5 rows)
 - `outputs/prompt_experiments_examples.csv` - Per-example predictions (7,125 rows)
 
 **Key Results:**
+
 - Mathematical problems: ~43% exact-match accuracy
 - Other problem types: ~0% exact-match accuracy
 - Few-shot strategy raises average similarity to 0.74 but doesn't improve exact-match
@@ -29,17 +32,20 @@ This guide walks through the complete transition from TF-IDF proxy evaluation to
 **Purpose:** Stratify TF-IDF failures by problem type, answer family, and prompt length to understand what works and what doesn't.
 
 **Run:**
+
 ```bash
 .\.venv\Scripts\python scripts\analyze_prompt_errors.py
 ```
 
 **Outputs:**
+
 - `outputs/prompt_error_analysis.md` - Human-readable report
 - `outputs/prompt_error_analysis_by_problem_type.csv` - Accuracy by problem type
 - `outputs/prompt_error_analysis_by_family_and_length.csv` - Accuracy by answer family and prompt length
 - `outputs/prompt_error_analysis_hard_cases.csv` - 15 hardest examples
 
 **Key Insights:**
+
 - Roman answers: some recovery with prompt engineering (1.85–2.26 strategies correct)
 - Binary, numeric, text answers: near-zero success across all strategies
 - Hard cases: mostly Cryptography-type prompts with perfect retrieval similarity but wrong answers
@@ -59,12 +65,14 @@ If you don't have immediate access to a GPU or want to validate the pipeline fir
 ```
 
 This script:
+
 - Loads GPT-2 (tiny, CPU-compatible)
 - Tests the generation pipeline on 5 validation examples
 - Confirms the code path works before running expensive Nemotron evaluation
 - Takes ~30 seconds
 
 **Expected Output:**
+
 ```
 Testing model generation pipeline with GPT-2...
 ...
@@ -81,6 +89,7 @@ Once you're ready for production evaluation on a GPU machine:
 ```
 
 **Requirements:**
+
 - GPU with sufficient VRAM:
   - 60GB+ for bfloat16 (full precision)
   - 15–20GB with 4-bit quantization (default, recommended)
@@ -91,6 +100,7 @@ Once you're ready for production evaluation on a GPU machine:
   Then paste your access token from https://huggingface.co/settings/tokens
 
 **What the Script Does:**
+
 1. Loads validation set (1,425 examples)
 2. For each strategy (minimal, instruction, cot, answer_format, few_shot):
    - Creates strategy-specific prompts
@@ -101,10 +111,12 @@ Once you're ready for production evaluation on a GPU machine:
 4. Prints summary table
 
 **Outputs:**
+
 - `outputs/model_generation_summary.csv` - Per-strategy accuracy from actual model
 - `outputs/model_generation_examples.csv` - Per-example predictions (7,125 rows with generated answers)
 
 **Example Output:**
+
 ```
 ================================================================================
 MODEL GENERATION EVALUATION SUMMARY
@@ -119,10 +131,12 @@ MODEL GENERATION EVALUATION SUMMARY
 **Troubleshooting:**
 
 If you encounter CUDA out-of-memory errors:
+
 - Script automatically uses 4-bit quantization (should fit in 15–20GB VRAM)
 - If still OOM: reduce generation batch size or use smaller model
 
 If model download fails:
+
 - Check internet connection
 - Ensure HuggingFace token is valid: `huggingface-cli login`
 - Model is 30B parameters (~60GB unquantized); requires stable connection
@@ -134,11 +148,13 @@ If model download fails:
 **Purpose:** Validate whether prompt strategies that work on TF-IDF also improve real model generation.
 
 **Run after Stage 3:**
+
 ```bash
 .\.venv\Scripts\python scripts\compare_proxy_vs_model.py
 ```
 
 **Outputs:**
+
 - `outputs/comparison_proxy_vs_model_summary.csv` - Side-by-side accuracy
 - `outputs/comparison_proxy_vs_model.md` - Detailed analysis
 - `outputs/comparison_disagreements.csv` - Cases where proxy and model disagree
@@ -146,14 +162,17 @@ If model download fails:
 **What to Look For:**
 
 ✓ **Good Alignment:** If proxy and model agree on best strategy
+
 - Proxy is reliable for strategy selection
 - Confirms TF-IDF captures meaningful signal
 
 ⚠️ **Divergence:** If proxy best ≠ model best
+
 - Proxy may not fully capture model behavior
 - Need to prioritize model results for strategy selection
 
 ✓ **Model Outperformance:** If model correct where proxy fails
+
 - Indicates model can reason beyond retrieval similarity
 - May justify fine-tuning on best strategies
 
@@ -162,15 +181,18 @@ If model download fails:
 ## Recommended Workflow
 
 ### Week 1: Validation & Testing
+
 1. ✅ Run prompt_engineering.py (TF-IDF proxy)
 2. ✅ Run analyze_prompt_errors.py (error analysis)
 3. Run test_generation_pipeline.py (validate code path with GPT-2)
 
 ### Week 2: Production Evaluation
+
 4. Run model_generation_evaluation.py (full Nemotron evaluation on GPU machine)
 5. Run compare_proxy_vs_model.py (validate against TF-IDF proxy)
 
 ### Week 3: Iteration
+
 6. Based on comparison results:
    - If model performs well: select best strategy, prepare for LoRA fine-tuning
    - If model struggles: analyze failure modes, iterate on prompt design
@@ -195,6 +217,7 @@ FewShot:         Example 1: ... Answer: ... \n Example 2: ... \n Now answer: {us
 ### Answer Normalization
 
 Both proxy and model use identical answer normalization:
+
 ```python
 normalized = answer.lower().strip()
 ```
@@ -204,11 +227,13 @@ This ensures fair comparison (exact-match is binary, 1 if normalized answers mat
 ### Generation Parameters
 
 **Model generation:**
+
 - `temperature=0.0` (deterministic, greedy sampling)
 - `max_new_tokens=64` (sufficient for most reasoning answers)
 - `top_p=0.95` (only if temperature > 0)
 
 **Comparison metric:**
+
 - Exact-match: binary (1 if normalized gold == normalized generated)
 - No partial credit (unlike retrieval similarity)
 
@@ -272,6 +297,7 @@ A: The test_generation_pipeline.py with GPT-2 works on CPU. For Nemotron, you ne
 
 **Q: Why does the model perform worse than TF-IDF?**
 A: Common reasons:
+
 - Model struggles with instruction-following on reasoning tasks
 - Answer format in completions differs from gold answers
 - Model generates verbose text that fails exact-match
@@ -279,6 +305,7 @@ A: Common reasons:
 
 **Q: Can I use a smaller model than Nemotron?**
 A: Yes, but it should be instruction-tuned for best results. Examples:
+
 - Llama-2-7B-Chat
 - Mistral-7B-Instruct
 - Phi-2 or Phi-3
