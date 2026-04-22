@@ -4,6 +4,7 @@
 The script reads outputs/prompt_experiments_examples.csv and produces:
 - outputs/prompt_error_analysis.md
 - outputs/prompt_error_analysis_by_problem_type.csv
+- outputs/prompt_error_analysis_by_family_and_length.csv
 - outputs/prompt_error_analysis_hard_cases.csv
 
 Problem types are inferred from prompt keywords using the same coarse reasoning
@@ -137,8 +138,30 @@ def preview(text: object, limit: int = 220) -> str:
     return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
+def add_prompt_length_bucket(prompt_frame: pd.DataFrame) -> pd.DataFrame:
+    prompt_frame = prompt_frame.copy()
+    if prompt_frame.empty:
+        prompt_frame["prompt_length_bucket"] = pd.Series(dtype=str)
+        return prompt_frame
+
+    bucket_labels = ["Q1 shortest", "Q2", "Q3", "Q4", "Q5 longest"]
+    try:
+        prompt_frame["prompt_length_bucket"] = pd.qcut(
+            prompt_frame["prompt_length"],
+            q=5,
+            labels=bucket_labels,
+            duplicates="drop",
+        )
+    except ValueError:
+        prompt_frame["prompt_length_bucket"] = "single_bucket"
+    return prompt_frame
+
+
 def build_report(
-    examples: pd.DataFrame, by_problem_type: pd.DataFrame, hard_cases: pd.DataFrame
+    examples: pd.DataFrame,
+    by_problem_type: pd.DataFrame,
+    by_family_and_length: pd.DataFrame,
+    hard_cases: pd.DataFrame,
 ) -> str:
     total_rows = len(examples)
     total_prompts = examples["id"].nunique()
@@ -160,6 +183,10 @@ def build_report(
 
     lines.append("## Stratified accuracy by problem type")
     lines.append(by_problem_type.to_string(index=False))
+    lines.append("")
+
+    lines.append("## Failure analysis by answer family and prompt length")
+    lines.append(by_family_and_length.to_string(index=False))
     lines.append("")
 
     best_per_type = (
@@ -225,6 +252,11 @@ def main() -> None:
         default="outputs/prompt_error_analysis_by_problem_type.csv",
     )
     parser.add_argument(
+        "--out-family-length",
+        type=str,
+        default="outputs/prompt_error_analysis_by_family_and_length.csv",
+    )
+    parser.add_argument(
         "--out-hard-cases",
         type=str,
         default="outputs/prompt_error_analysis_hard_cases.csv",
@@ -249,6 +281,18 @@ def main() -> None:
     examples["gold_length"] = examples["gold_answer"].astype(str).str.len()
     examples["pred_length"] = examples["pred_answer"].astype(str).str.len()
 
+    prompt_summary = examples.groupby(
+        ["id", "prompt", "prompt_preview", "problem_type"], as_index=False
+    ).agg(
+        prompt_length=("prompt_length", "first"),
+        gold_family=("gold_family", "first"),
+        strategies_correct=("exact", "sum"),
+        strategies_total=("exact", "size"),
+        best_similarity=("similarity", "max"),
+        mean_similarity=("similarity", "mean"),
+    )
+    prompt_summary = add_prompt_length_bucket(prompt_summary)
+
     per_type = (
         examples.groupby(["strategy", "problem_type"], as_index=False)
         .agg(
@@ -261,6 +305,26 @@ def main() -> None:
         .sort_values(
             ["problem_type", "exact_match", "support"], ascending=[True, False, False]
         )
+    )
+
+    by_family_and_length = prompt_summary.groupby(
+        ["gold_family", "prompt_length_bucket"], as_index=False
+    ).agg(
+        prompts=("id", "size"),
+        avg_strategies_correct=("strategies_correct", "mean"),
+        zero_success_rate=("strategies_correct", lambda values: (values == 0).mean()),
+        any_success_rate=("strategies_correct", lambda values: (values > 0).mean()),
+        all_success_rate=("strategies_correct", lambda values: (values == 5).mean()),
+        avg_prompt_length=("prompt_length", "mean"),
+        avg_best_similarity=("best_similarity", "mean"),
+    )
+
+    # Compute avg_failures separately so it reflects the prompt-level number of misses.
+    by_family_and_length["avg_failures"] = (
+        5 - by_family_and_length["avg_strategies_correct"]
+    )
+    by_family_and_length = by_family_and_length.sort_values(
+        ["gold_family", "prompt_length_bucket"], ascending=[True, True]
     )
 
     # Prompts with zero correct predictions across all strategies.
@@ -295,15 +359,18 @@ def main() -> None:
         else pd.DataFrame(columns=examples.columns)
     )
 
-    report_text = build_report(examples, per_type, hard_cases)
+    report_text = build_report(examples, per_type, by_family_and_length, hard_cases)
 
     out_md = project_dir / args.out_md
     out_summary = project_dir / args.out_summary
+    out_family_length = project_dir / args.out_family_length
     out_hard_cases = project_dir / args.out_hard_cases
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_summary.parent.mkdir(parents=True, exist_ok=True)
+    out_family_length.parent.mkdir(parents=True, exist_ok=True)
 
     per_type.to_csv(out_summary, index=False)
+    by_family_and_length.to_csv(out_family_length, index=False)
     hard_cases.to_csv(out_hard_cases, index=False)
     out_md.write_text(report_text, encoding="utf-8")
 
@@ -324,6 +391,7 @@ def main() -> None:
         )
     print(f"\nWrote report to {out_md}")
     print(f"Wrote stratified summary to {out_summary}")
+    print(f"Wrote family-length summary to {out_family_length}")
     print(f"Wrote hard cases to {out_hard_cases}")
 
 
