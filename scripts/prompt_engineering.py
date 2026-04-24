@@ -92,7 +92,7 @@ def run_strategy(
         lowercase=True,
         ngram_range=(1, 2),
         max_features=8000,
-        token_pattern=r"(?u)\\b\\w+\\b",
+        token_pattern=r"(?u)\b\w+\b",
     )
     try:
         train_matrix = vectorizer.fit_transform(train_texts)
