@@ -1,0 +1,6 @@
+strategy,n_valid,exact_match,avg_similarity
+minimal,1425,,
+instruction,1425,,
+cot,1425,,
+answer_format,1425,,
+few_shot,1425,,
